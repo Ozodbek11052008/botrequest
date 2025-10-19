@@ -4,44 +4,117 @@ const token = "8318189443:AAHdp7AcIxwgIbYR0HOueTZ3lzUBX4slW8Q";
 const bot = new TelegramBot(token, { polling: true });
 
 // Store admin IDs and pending join requests
-const ADMINS = [5310317109, 5543574742]; // Replace with actual admin user IDs
-const pendingRequests = new Map(); // chatId -> array of user objects
-const approvedUsers = new Map(); // Store approved user objects with their info
+const ADMINS = [5310317109, 5543574742];
+const pendingRequests = new Map();
+const approvedUsers = new Map();
+const broadcastStates = new Map();
 
-// Track broadcast state
-const broadcastStates = new Map(); // adminId -> { waitingForMessage: true }
+// NEW: Memory-based user tracking
+let users = new Map();
+let totalStarts = 0;
+let botStartTime = new Date();
 
-// Admin keyboard
+// Admin keyboard (UPDATED with Uzbek translations)
 const adminKeyboard = {
     reply_markup: {
         keyboard: [
-            ["📊 Show Users", "✅ Accept All"],
-            ["📢 Send Message", "🔄 Refresh"],
-            ["👥 Approved Users"]
+            ["📊 Barcha Foydalanuvchilar", "🎯 Faol Foydalanuvchilar"],
+            ["✅ Hammasini Tasdiqlash", "👥 Tasdiqlanganlar"],
+            ["📢 Xabar Yuborish", "🔄 Yangilash"]
         ],
         resize_keyboard: true
     }
 };
+
+// NEW: User tracking functions
+function addOrUpdateUser(userId, username, firstName, lastName) {
+    const timestamp = new Date();
+    const userKey = userId.toString();
+    
+    if (users.has(userKey)) {
+        const user = users.get(userKey);
+        user.startCount += 1;
+        user.lastSeen = timestamp;
+        user.username = username;
+        user.firstName = firstName;
+        user.lastName = lastName;
+    } else {
+        users.set(userKey, {
+            userId: userId,
+            username: username,
+            firstName: firstName,
+            lastName: lastName,
+            startCount: 1,
+            firstSeen: timestamp,
+            lastSeen: timestamp,
+            isActive: true
+        });
+    }
+    
+    totalStarts += 1;
+}
+
+function getActiveUsers() {
+    const now = new Date();
+    const twentyFourHoursAgo = new Date(now - 24 * 60 * 60 * 1000);
+    
+    return Array.from(users.values())
+        .filter(user => user.lastSeen >= twentyFourHoursAgo)
+        .sort((a, b) => b.lastSeen - a.lastSeen);
+}
+
+function getAllTrackedUsers() {
+    return Array.from(users.values()).sort((a, b) => 
+        b.lastSeen - a.lastSeen
+    );
+}
+
+function getUserStats() {
+    const totalUsers = users.size;
+    const now = new Date();
+    
+    const activeUsers = Array.from(users.values()).filter(user => {
+        const timeDiff = now - user.lastSeen;
+        const hoursDiff = timeDiff / (1000 * 60 * 60);
+        return hoursDiff <= 24;
+    }).length;
+    
+    const newToday = Array.from(users.values()).filter(user => {
+        const today = new Date();
+        return user.firstSeen.getDate() === today.getDate() &&
+               user.firstSeen.getMonth() === today.getMonth() &&
+               user.firstSeen.getFullYear() === today.getFullYear();
+    }).length;
+    
+    const uptime = Math.floor((now - botStartTime) / 1000);
+    const hours = Math.floor(uptime / 3600);
+    const minutes = Math.floor((uptime % 3600) / 60);
+    
+    return {
+        totalUsers,
+        totalStarts,
+        activeUsers,
+        newToday,
+        uptime: `${hours}h ${minutes}m`
+    };
+}
 
 // When someone submits a join request
 bot.on("chat_join_request", async (msg) => {
     const user = msg.from;
     const chat = msg.chat;
 
-    console.log(`🔔 Новая заявка от ${user.username || user.first_name} в ${chat.title}`);
+    console.log(`🔔 Yangi so'rov: ${user.username || user.first_name} dan ${chat.title} kanaliga`);
 
-    // Store the pending request
     if (!pendingRequests.has(chat.id)) {
         pendingRequests.set(chat.id, []);
     }
     
-    // Check if user is already in pending requests to avoid duplicates
     const existingUser = pendingRequests.get(chat.id).find(u => u.id === user.id);
     if (!existingUser) {
         pendingRequests.get(chat.id).push(user);
-        console.log(`📥 Added to pending: ${user.first_name} (ID: ${user.id})`);
+        console.log(`📥 Kutish ro'yxatiga qo'shildi: ${user.first_name} (ID: ${user.id})`);
         
-        // Notify admins about new request
         notifyAdminsAboutNewRequest(user, chat);
     }
 });
@@ -52,7 +125,11 @@ bot.on("message", async (msg) => {
     const text = msg.text;
     const user = msg.from;
 
-    // Check if user is admin
+    // NEW: Track all user interactions
+    if (text === '/start' || text === '/admin') {
+        addOrUpdateUser(user.id, user.username || '', user.first_name || '', user.last_name || '');
+    }
+
     if (!ADMINS.includes(user.id)) {
         if (broadcastStates.has(user.id) && broadcastStates.get(user.id).waitingForMessage) {
             return;
@@ -72,24 +149,29 @@ bot.on("message", async (msg) => {
                 await showAdminPanel(chatId);
                 break;
             
-            case "📊 Show Users":
-                await showPendingUsers(chatId);
+            case "📊 Barcha Foydalanuvchilar":
+                await showAllTrackedUsers(chatId);
                 break;
             
-            case "✅ Accept All":
+            case "✅ Hammasini Tasdiqlash":
                 await acceptAllPendingRequests(chatId);
                 break;
             
-            case "🔄 Refresh":
+            case "🔄 Yangilash":
                 await showAdminPanel(chatId);
                 break;
             
-            case "📢 Send Message":
+            case "📢 Xabar Yuborish":
                 await startBroadcastMode(chatId, user.id);
                 break;
             
-            case "👥 Approved Users":
+            case "👥 Tasdiqlanganlar":
                 await showApprovedUsers(chatId);
+                break;
+
+            // NEW: Active Users button
+            case "🎯 Faol Foydalanuvchilar":
+                await showActiveUsers(chatId);
                 break;
             
             default:
@@ -105,27 +187,36 @@ bot.on("message", async (msg) => {
         }
     } catch (err) {
         console.error("Error handling admin command:", err);
-        await bot.sendMessage(chatId, "❌ Error: " + err.message, adminKeyboard);
+        await bot.sendMessage(chatId, "❌ Xatolik: " + err.message, adminKeyboard);
     }
 });
 
-// Admin panel functions
+// UPDATED: Admin panel with Uzbek translations
 async function showAdminPanel(chatId) {
     const totalPending = Array.from(pendingRequests.values()).reduce((sum, users) => sum + users.length, 0);
     const totalApproved = approvedUsers.size;
+    const stats = getUserStats();
     
     await bot.sendMessage(
         chatId,
         `🛠️ *Admin Panel*\n\n` +
-        `📊 *Pending Requests:* ${totalPending}\n` +
-        `✅ *Approved Users:* ${totalApproved}\n` +
-        `👥 *Active Chats:* ${pendingRequests.size}\n\n` +
-        `*Available Commands:*\n` +
-        `• 📊 Show Users - View all pending requests\n` +
-        `• ✅ Accept All - Approve all pending requests\n` +
-        `• 👥 Approved Users - View approved users\n` +
-        `• 📢 Send Message - Broadcast message to users\n` +
-        `• 🔄 Refresh - Update statistics`,
+        `📊 *Statistika:*\n` +
+        `• Jami Foydalanuvchilar: ${stats.totalUsers}\n` +
+        `• Faol Foydalanuvchilar (24 soat): ${stats.activeUsers}\n` +
+        `• Bugun qo'shilganlar: ${stats.newToday}\n` +
+        `• Jami startlar: ${stats.totalStarts}\n\n` +
+        `📋 *So'rovlar:*\n` +
+        `• Kutayotgan so'rovlar: ${totalPending}\n` +
+        `• Tasdiqlanganlar: ${totalApproved}\n` +
+        `• Faol kanallar: ${pendingRequests.size}\n\n` +
+        `⏰ Ish vaqti: ${stats.uptime}\n\n` +
+        `*Mavjud buyruqlar:*\n` +
+        `• 📊 Barcha Foydalanuvchilar - Barcha foydalanuvchilarni ko'rish\n` +
+        `• 🎯 Faol Foydalanuvchilar - 24 soatlik faol foydalanuvchilar\n` +
+        `• ✅ Hammasini Tasdiqlash - Barcha so'rovlarni tasdiqlash\n` +
+        `• 👥 Tasdiqlanganlar - Kanalga tasdiqlanganlar\n` +
+        `• 📢 Xabar Yuborish - Xabar tarqatish\n` +
+        `• 🔄 Yangilash - Statistikan yangilash`,
         { 
             parse_mode: "Markdown",
             ...adminKeyboard 
@@ -133,20 +224,95 @@ async function showAdminPanel(chatId) {
     );
 }
 
-async function showPendingUsers(chatId) {
-    console.log('📊 Show Pending Users called');
+// NEW: Function to show active users (last 24 hours) in Uzbek
+async function showActiveUsers(chatId) {
+    const activeUsers = getActiveUsers();
+    
+    if (activeUsers.length === 0) {
+        await bot.sendMessage(chatId, "📭 So'ngi 24 soatda faol foydalanuvchilar yo'q.", adminKeyboard);
+        return;
+    }
+
+    try {
+        let message = `🎯 Faol Foydalanuvchilar (So'ngi 24 soat) - Jami: ${activeUsers.length}\n\n`;
+        
+        activeUsers.forEach((user, index) => {
+            const username = user.username ? `@${user.username}` : 'Username yo\'q';
+            const fullName = `${user.firstName}${user.lastName ? ' ' + user.lastName : ''}`;
+            const lastSeen = user.lastSeen.toLocaleString();
+            
+            message += `${index + 1}. ${fullName}\n`;
+            message += `   👤 Username: ${username}\n`;
+            message += `   🆔 User ID: ${user.userId}\n`;
+            message += `   🔄 Startlar: ${user.startCount}\n`;
+            message += `   ⏰ So'ngi faollik: ${lastSeen}\n`;
+            message += `   📨 Xabar yuborish: /broadcast_${user.userId}\n\n`;
+        });
+
+        // Send without Markdown to avoid parsing errors
+        const messages = splitMessage(message);
+        for (const msg of messages) {
+            await bot.sendMessage(chatId, msg, adminKeyboard);
+        }
+    } catch (error) {
+        console.error("Error showing active users:", error);
+        await bot.sendMessage(chatId, "❌ Faol foydalanuvchilarni ko'rsatishda xatolik. Iltimos, qayta urinib ko'ring.", adminKeyboard);
+    }
+}
+
+// NEW: Function to show ALL tracked users in Uzbek
+async function showAllTrackedUsers(chatId) {
+    console.log('📊 Show ALL Tracked Users called');
+    
+    const allUsers = getAllTrackedUsers();
+    
+    if (allUsers.length === 0) {
+        await bot.sendMessage(chatId, "📭 Tizimda foydalanuvchilar topilmadi.", adminKeyboard);
+        return;
+    }
+
+    try {
+        let message = `📊 Barcha Foydalanuvchilar - Jami: ${allUsers.length}\n\n`;
+        
+        allUsers.forEach((user, index) => {
+            const username = user.username ? `@${user.username}` : 'Username yo\'q';
+            const fullName = `${user.firstName}${user.lastName ? ' ' + user.lastName : ''}`;
+            const lastSeen = user.lastSeen.toLocaleString();
+            const firstSeen = user.firstSeen.toLocaleString();
+            
+            message += `${index + 1}. ${fullName}\n`;
+            message += `   👤 Username: ${username}\n`;
+            message += `   🆔 User ID: ${user.userId}\n`;
+            message += `   🔄 Startlar: ${user.startCount}\n`;
+            message += `   📅 Birinchi ko'rinish: ${firstSeen}\n`;
+            message += `   ⏰ So'ngi faollik: ${lastSeen}\n`;
+            message += `   📨 Xabar yuborish: /broadcast_${user.userId}\n\n`;
+        });
+
+        const messages = splitMessage(message);
+        for (const msg of messages) {
+            await bot.sendMessage(chatId, msg, adminKeyboard);
+        }
+    } catch (error) {
+        console.error("Error showing all users:", error);
+        await bot.sendMessage(chatId, "❌ Foydalanuvchilarni ko'rsatishda xatolik: " + error.message, adminKeyboard);
+    }
+}
+
+// NEW: Function to show pending channel requests in Uzbek
+async function showPendingRequests(chatId) {
+    console.log('📋 Show Pending Requests called');
     console.log('Pending requests map:', Array.from(pendingRequests.entries()));
     
     if (pendingRequests.size === 0) {
         console.log('No pending requests found');
-        await bot.sendMessage(chatId, "📭 No pending requests found.", adminKeyboard);
+        await bot.sendMessage(chatId, "📭 Kutayotgan kanal so'rovlari topilmadi.", adminKeyboard);
         return;
     }
 
     try {
         let allUsers = [];
         
-        // Collect all users from all chats
         for (const [chatIdKey, users] of pendingRequests.entries()) {
             console.log(`Chat ${chatIdKey} has ${users.length} users:`, users);
             allUsers = allUsers.concat(users.map(user => ({ ...user, chatId: chatIdKey })));
@@ -154,38 +320,34 @@ async function showPendingUsers(chatId) {
 
         if (allUsers.length === 0) {
             console.log('No users found in pending requests');
-            await bot.sendMessage(chatId, "📭 No pending requests found.", adminKeyboard);
+            await bot.sendMessage(chatId, "📭 Kutayotgan kanal so'rovlari topilmadi.", adminKeyboard);
             return;
         }
 
         console.log(`Total pending users: ${allUsers.length}`);
         
-        let message = `📋 *Pending Requests - Total: ${allUsers.length}*\n\n`;
+        let message = `📋 Kutayotgan Kanal So'rovlari - Jami: ${allUsers.length}\n\n`;
         
         allUsers.forEach((user, index) => {
-            const username = user.username ? `@${user.username}` : 'No username';
+            const username = user.username ? `@${user.username}` : 'Username yo\'q';
             const fullName = `${user.first_name}${user.last_name ? ' ' + user.last_name : ''}`;
             
             message += `${index + 1}. ${fullName}\n`;
-            message += `   Username: ${username}\n`;
-            message += `   User ID: ${user.id}\n`;
-            message += `   Chat ID: ${user.chatId}\n`;
-            message += `   Approve: /approve_${user.id}\n\n`;
+            message += `   👤 Username: ${username}\n`;
+            message += `   🆔 User ID: ${user.id}\n`;
+            message += `   💬 Kanal ID: ${user.chatId}\n`;
+            message += `   ✅ Tasdiqlash: /approve_${user.id}\n\n`;
         });
 
         console.log('Generated message:', message);
         
-        // Split long messages
         const messages = splitMessage(message);
         for (const msg of messages) {
-            await bot.sendMessage(chatId, msg, { 
-                parse_mode: "Markdown",
-                ...adminKeyboard 
-            });
+            await bot.sendMessage(chatId, msg, adminKeyboard);
         }
     } catch (error) {
-        console.error("Error showing pending users:", error);
-        await bot.sendMessage(chatId, "❌ Error displaying pending users: " + error.message, adminKeyboard);
+        console.error("Error showing pending requests:", error);
+        await bot.sendMessage(chatId, "❌ Kutayotgan so'rovlarni ko'rsatishda xatolik: " + error.message, adminKeyboard);
     }
 }
 
@@ -194,36 +356,33 @@ async function showApprovedUsers(chatId) {
     console.log('Approved users map:', Array.from(approvedUsers.entries()));
     
     if (approvedUsers.size === 0) {
-        await bot.sendMessage(chatId, "✅ No approved users yet.", adminKeyboard);
+        await bot.sendMessage(chatId, "✅ Hali tasdiqlangan foydalanuvchilar yo'q.", adminKeyboard);
         return;
     }
 
     try {
-        let message = `👥 *Approved Users - Total: ${approvedUsers.size}*\n\n`;
+        let message = `👥 Tasdiqlangan Foydalanuvchilar - Jami: ${approvedUsers.size}\n\n`;
         let count = 1;
         
         for (const [userId, userData] of approvedUsers.entries()) {
-            const username = userData.username ? `@${userData.username}` : 'No username';
+            const username = userData.username ? `@${userData.username}` : 'Username yo\'q';
             const fullName = `${userData.first_name}${userData.last_name ? ' ' + userData.last_name : ''}`;
             
             message += `${count}. ${fullName}\n`;
-            message += `   Username: ${username}\n`;
-            message += `   User ID: ${userId}\n`;
-            message += `   Approved: ${new Date(userData.approvedAt).toLocaleString()}\n`;
-            message += `   Broadcast: /broadcast_${userId}\n\n`;
+            message += `   👤 Username: ${username}\n`;
+            message += `   🆔 User ID: ${userId}\n`;
+            message += `   ✅ Tasdiqlangan: ${new Date(userData.approvedAt).toLocaleString()}\n`;
+            message += `   📨 Xabar yuborish: /broadcast_${userId}\n\n`;
             count++;
         }
 
         const messages = splitMessage(message);
         for (const msg of messages) {
-            await bot.sendMessage(chatId, msg, { 
-                parse_mode: "Markdown",
-                ...adminKeyboard 
-            });
+            await bot.sendMessage(chatId, msg, adminKeyboard);
         }
     } catch (error) {
         console.error("Error showing approved users:", error);
-        await bot.sendMessage(chatId, "❌ Error displaying approved users: " + error.message, adminKeyboard);
+        await bot.sendMessage(chatId, "❌ Tasdiqlangan foydalanuvchilarni ko'rsatishda xatolik: " + error.message, adminKeyboard);
     }
 }
 
@@ -253,7 +412,6 @@ async function acceptAllPendingRequests(adminChatId) {
     let totalApproved = 0;
     let errors = 0;
 
-    // Create a copy of pending requests to avoid modification during iteration
     const pendingCopy = new Map(pendingRequests);
 
     for (const [chatId, users] of pendingCopy.entries()) {
@@ -262,27 +420,27 @@ async function acceptAllPendingRequests(adminChatId) {
                 console.log(`Approving user ${user.id} for chat ${chatId}`);
                 await bot.approveChatJoinRequest(chatId, user.id);
                 
-                // Store approved user with full data
                 approvedUsers.set(user.id, {
                     ...user,
                     approvedAt: new Date().toISOString()
                 });
+
+                // NEW: Track approved users
+                addOrUpdateUser(user.id, user.username || '', user.first_name || '', user.last_name || '');
                 
                 console.log(`✅ Approved and stored: ${user.first_name} (ID: ${user.id})`);
                 
-                // Send welcome message
                 await bot.sendMessage(
                     user.id,
-                    `Привет, ${user.first_name}! 👋\n\n` +
-                    `Твоя заявка на вступление в канал одобрена ✅\n\n` +
-                    `Добро пожаловать! 🎉`
+                    `Salom, ${user.first_name}! 👋\n\n` +
+                    `Sizning kanalga qo'shilish so'rovingiz tasdiqlandi ✅\n\n` +
+                    `Xush kelibsiz! 🎉`
                 ).catch(err => {
                     console.log(`Cannot send message to user ${user.id}: ${err.message}`);
                 });
                 
                 totalApproved++;
                 
-                // Remove from pending requests
                 const currentUsers = pendingRequests.get(chatId);
                 if (currentUsers) {
                     const userIndex = currentUsers.findIndex(u => u.id === user.id);
@@ -308,10 +466,10 @@ async function acceptAllPendingRequests(adminChatId) {
 
     await bot.sendMessage(
         adminChatId,
-        `✅ *Batch Approval Complete*\n\n` +
-        `✅ Approved: ${totalApproved} users\n` +
-        `❌ Errors: ${errors}\n` +
-        `📭 Pending requests cleared.`,
+        `✅ *Barcha So'rovlar Tasdiqlandi*\n\n` +
+        `✅ Tasdiqlandi: ${totalApproved} foydalanuvchi\n` +
+        `❌ Xatolar: ${errors}\n` +
+        `📭 Kutayotgan so'rovlar tozalandi.`,
         { 
             parse_mode: "Markdown",
             ...adminKeyboard 
@@ -333,25 +491,25 @@ async function approveSingleUser(userId, adminChatId) {
             try {
                 await bot.approveChatJoinRequest(chatId, user.id);
                 
-                // Store approved user with full data
                 approvedUsers.set(user.id, {
                     ...user,
                     approvedAt: new Date().toISOString()
                 });
+
+                // NEW: Track approved users
+                addOrUpdateUser(user.id, user.username || '', user.first_name || '', user.last_name || '');
                 
                 console.log(`✅ Approved single user: ${user.first_name} (ID: ${user.id})`);
                 
-                // Send welcome message
                 await bot.sendMessage(
                     user.id,
-                    `Привет, ${user.first_name}! 👋\n\n` +
-                    `Твоя заявка на вступление в канал одобрена ✅\n\n` +
-                    `Добро пожаловать! 🎉`
+                    `Salom, ${user.first_name}! 👋\n\n` +
+                    `Sizning kanalga qo'shilish so'rovingiz tasdiqlandi ✅\n\n` +
+                    `Xush kelibsiz! 🎉`
                 ).catch(err => {
                     console.log(`Cannot send message to user ${user.id}: ${err.message}`);
                 });
                 
-                // Remove from pending
                 users.splice(userIndex, 1);
                 if (users.length === 0) {
                     pendingRequests.delete(chatId);
@@ -359,7 +517,7 @@ async function approveSingleUser(userId, adminChatId) {
                 
                 await bot.sendMessage(
                     adminChatId, 
-                    `✅ Approved user: ${user.first_name}\nUser ID: ${user.id}`,
+                    `✅ Tasdiqlandi: ${user.first_name}\nUser ID: ${user.id}`,
                     adminKeyboard
                 );
                 approved = true;
@@ -369,7 +527,7 @@ async function approveSingleUser(userId, adminChatId) {
                 console.error(`❌ Error approving user ${userId}:`, err);
                 await bot.sendMessage(
                     adminChatId, 
-                    `❌ Error approving user: ${err.message}`, 
+                    `❌ Foydalanuvchini tasdiqlashda xatolik: ${err.message}`, 
                     adminKeyboard
                 );
                 return;
@@ -381,7 +539,7 @@ async function approveSingleUser(userId, adminChatId) {
         console.log(`❌ User ${userId} not found in pending requests`);
         await bot.sendMessage(
             adminChatId, 
-            "❌ User not found in pending requests.", 
+            "❌ Foydalanuvchi kutayotgan so'rovlar ro'yxatida topilmadi.", 
             adminKeyboard
         );
     }
@@ -390,21 +548,21 @@ async function approveSingleUser(userId, adminChatId) {
     console.log('Approved users after single approval:', Array.from(approvedUsers.entries()));
 }
 
-// Broadcast functions (keep the same as before)
+// Broadcast functions in Uzbek
 async function startBroadcastMode(chatId, adminId) {
     broadcastStates.set(adminId, { waitingForMessage: true });
     
     await bot.sendMessage(
         chatId,
-        `📢 *Broadcast Mode*\n\n` +
-        `Please send the message you want to broadcast to all ${approvedUsers.size} approved users.\n\n` +
-        `*Type your message now...*\n\n` +
-        `To cancel, send /cancel`,
+        `📢 *Xabar Tarqatish Rejimi*\n\n` +
+        `Iltimos, barcha ${approvedUsers.size} tasdiqlangan foydalanuvchilarga yubormoqchi bo'lgan xabaringizni kiriting.\n\n` +
+        `*Xabaringizni hozir yuboring...*\n\n` +
+        `Bekor qilish uchun /cancel yuboring`,
         { 
             parse_mode: "Markdown",
             reply_markup: {
                 remove_keyboard: true,
-                inline_keyboard: [[{ text: "❌ Cancel", callback_data: "cancel_broadcast" }]]
+                inline_keyboard: [[{ text: "❌ Bekor qilish", callback_data: "cancel_broadcast" }]]
             }
         }
     );
@@ -414,20 +572,20 @@ async function handleBroadcastMessage(adminId, message, adminChatId) {
     broadcastStates.delete(adminId);
 
     if (message === '/cancel') {
-        await bot.sendMessage(adminChatId, "❌ Broadcast cancelled.", adminKeyboard);
+        await bot.sendMessage(adminChatId, "❌ Xabar tarqatish bekor qilindi.", adminKeyboard);
         return;
     }
 
     if (approvedUsers.size === 0) {
-        await bot.sendMessage(adminChatId, "❌ No approved users to broadcast to.", adminKeyboard);
+        await bot.sendMessage(adminChatId, "❌ Xabar yuborish uchun tasdiqlangan foydalanuvchilar yo'q.", adminKeyboard);
         return;
     }
 
     const broadcastMsg = await bot.sendMessage(
         adminChatId,
-        `📢 *Starting Broadcast...*\n\n` +
-        `Sending to ${approvedUsers.size} users...\n` +
-        `⏳ Please wait...`,
+        `📢 *Xabar Tarqatish Boshlandi...*\n\n` +
+        `${approvedUsers.size} foydalanuvchiga yuborilmoqda...\n` +
+        `⏳ Iltimos, kuting...`,
         { parse_mode: "Markdown" }
     );
 
@@ -444,11 +602,11 @@ async function handleBroadcastMessage(adminId, message, adminChatId) {
             
             if (current % 10 === 0 || current === approvedUsers.size) {
                 await bot.editMessageText(
-                    `📢 *Broadcasting...*\n\n` +
-                    `Sending to ${approvedUsers.size} users...\n` +
-                    `✅ Success: ${successCount}\n` +
-                    `❌ Failed: ${failCount}\n` +
-                    `⏳ Progress: ${current}/${approvedUsers.size} (${Math.round((current / approvedUsers.size) * 100)}%)`,
+                    `📢 *Xabar Tarqatilmoqda...*\n\n` +
+                    `${approvedUsers.size} foydalanuvchiga yuborilmoqda...\n` +
+                    `✅ Muvaffaqiyatli: ${successCount}\n` +
+                    `❌ Xatolar: ${failCount}\n` +
+                    `⏳ Jarayon: ${current}/${approvedUsers.size} (${Math.round((current / approvedUsers.size) * 100)}%)`,
                     {
                         chat_id: adminChatId,
                         message_id: broadcastMsg.message_id,
@@ -466,11 +624,11 @@ async function handleBroadcastMessage(adminId, message, adminChatId) {
     }
 
     await bot.editMessageText(
-        `📢 *Broadcast Complete!*\n\n` +
-        `✅ Successfully sent: ${successCount} users\n` +
-        `❌ Failed: ${failCount} users\n` +
-        `📊 Total: ${approvedUsers.size} users\n\n` +
-        `*Message sent:*\n${message.substring(0, 100)}${message.length > 100 ? '...' : ''}`,
+        `📢 *Xabar Tarqatish Yakunlandi!*\n\n` +
+        `✅ Muvaffaqiyatli yuborildi: ${successCount} foydalanuvchi\n` +
+        `❌ Xatolar: ${failCount} foydalanuvchi\n` +
+        `📊 Jami: ${approvedUsers.size} foydalanuvchi\n\n` +
+        `*Yuborilgan xabar:*\n${message.substring(0, 100)}${message.length > 100 ? '...' : ''}`,
         {
             chat_id: adminChatId,
             message_id: broadcastMsg.message_id,
@@ -488,7 +646,7 @@ bot.on("callback_query", async (callbackQuery) => {
 
     if (data === "cancel_broadcast" && ADMINS.includes(user.id)) {
         broadcastStates.delete(user.id);
-        await bot.editMessageText("❌ Broadcast cancelled.", {
+        await bot.editMessageText("❌ Xabar tarqatish bekor qilindi.", {
             chat_id: message.chat.id,
             message_id: message.message_id,
             ...adminKeyboard
@@ -500,18 +658,18 @@ bot.on("callback_query", async (callbackQuery) => {
 async function sendUserBroadcast(userId, adminChatId) {
     await bot.sendMessage(
         adminChatId,
-        `Send broadcast message for user ${userId}:\n\n` +
-        `Use the main "📢 Send Message" button to broadcast to all users, or implement individual user messaging here.`,
+        `Foydalanuvchi ${userId} ga xabar yuborish:\n\n` +
+        `Barcha foydalanuvchilarga xabar yuborish uchun asosiy "📢 Xabar Yuborish" tugmasidan foydalaning.`,
         adminKeyboard
     );
 }
 
 function notifyAdminsAboutNewRequest(user, chat) {
-    const message = `🔔 *New Join Request*\n\n` +
-                   `User: ${user.first_name} ${user.username ? `(@${user.username})` : ''}\n` +
+    const message = `🔔 *Yangi Kanal So'rovi*\n\n` +
+                   `Foydalanuvchi: ${user.first_name} ${user.username ? `(@${user.username})` : ''}\n` +
                    `User ID: ${user.id}\n` +
-                   `Chat: ${chat.title}\n` +
-                   `Time: ${new Date().toLocaleString()}`;
+                   `Kanal: ${chat.title}\n` +
+                   `Vaqt: ${new Date().toLocaleString()}`;
 
     ADMINS.forEach(adminId => {
         bot.sendMessage(adminId, message, { parse_mode: "Markdown", ...adminKeyboard })
@@ -526,7 +684,7 @@ bot.onText(/\/cancel/, (msg) => {
         if (broadcastStates.has(user.id)) {
             broadcastStates.delete(user.id);
         }
-        bot.sendMessage(msg.chat.id, "❌ Operation cancelled.", adminKeyboard);
+        bot.sendMessage(msg.chat.id, "❌ Operatsiya bekor qilindi.", adminKeyboard);
     }
 });
 
@@ -539,11 +697,12 @@ bot.on("message", (msg) => {
         !broadcastStates.has(user.id) && 
         !text.startsWith('/') &&
         ![
-            "📊 Show Users",
-            "✅ Accept All", 
-            "📢 Send Message",
-            "🔄 Refresh",
-            "👥 Approved Users"
+            "📊 Barcha Foydalanuvchilar",
+            "🎯 Faol Foydalanuvchilar",
+            "✅ Hammasini Tasdiqlash", 
+            "📢 Xabar Yuborish",
+            "🔄 Yangilash",
+            "👥 Tasdiqlanganlar"
         ].includes(text)) {
         
         showAdminPanel(msg.chat.id);
@@ -555,4 +714,4 @@ bot.on("error", (error) => {
     console.error("Bot error:", error);
 });
 
-console.log("🤖 Bot started with debug logging...");
+console.log("🤖 Bot foydalanuvchilarni kuzatish va faol foydalanuvchilar funksiyasi bilan ishga tushdi...");
