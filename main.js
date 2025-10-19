@@ -282,18 +282,7 @@ async function showActiveUsers(chatId) {
     try {
         let message = `🎯 Faol Foydalanuvchilar (So'ngi 24 soat) - Jami: ${activeUsers.length}\n\n`;
         
-        activeUsers.forEach((user, index) => {
-            const username = user.username ? `@${user.username}` : 'Username yo\'q';
-            const fullName = `${user.firstName}${user.lastName ? ' ' + user.lastName : ''}`;
-            const lastSeen = user.lastSeen.toLocaleString();
-            
-            message += `${index + 1}. ${fullName}\n`;
-            message += `   👤 Username: ${username}\n`;
-            message += `   🆔 User ID: ${user.userId}\n`;
-            message += `   🔄 Startlar: ${user.startCount}\n`;
-            message += `   ⏰ So'ngi faollik: ${lastSeen}\n`;
-            message += `   📨 Xabar yuborish: /broadcast_${user.userId}\n\n`;
-        });
+        
 
         // Send without Markdown to avoid parsing errors
         const messages = splitMessage(message);
@@ -319,26 +308,7 @@ async function showAllTrackedUsers(chatId) {
 
     try {
         let message = `📊 Barcha Foydalanuvchilar - Jami: ${allUsers.length}\n\n`;
-        
-        allUsers.forEach((user, index) => {
-            const username = user.username ? `@${user.username}` : 'Username yo\'q';
-            const fullName = `${user.firstName}${user.lastName ? ' ' + user.lastName : ''}`;
-            const lastSeen = user.lastSeen.toLocaleString();
-            const firstSeen = user.firstSeen.toLocaleString();
-            
-            message += `${index + 1}. ${fullName}\n`;
-            message += `   👤 Username: ${username}\n`;
-            message += `   🆔 User ID: ${user.userId}\n`;
-            message += `   🔄 Startlar: ${user.startCount}\n`;
-            message += `   📅 Birinchi ko'rinish: ${firstSeen}\n`;
-            message += `   ⏰ So'ngi faollik: ${lastSeen}\n`;
-            message += `   📨 Xabar yuborish: /broadcast_${user.userId}\n\n`;
-        });
-
-        const messages = splitMessage(message);
-        for (const msg of messages) {
-            await bot.sendMessage(chatId, msg, adminKeyboard);
-        }
+    
     } catch (error) {
         console.error("Error showing all users:", error);
         await bot.sendMessage(chatId, "❌ Foydalanuvchilarni ko'rsatishda xatolik: " + error.message, adminKeyboard);
