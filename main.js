@@ -282,7 +282,7 @@ async function showActiveUsers(chatId) {
     try {
         let message = `🎯 Faol Foydalanuvchilar (So'ngi 24 soat) - Jami: ${activeUsers.length}\n\n`;
         
-        
+      
 
         // Send without Markdown to avoid parsing errors
         const messages = splitMessage(message);
@@ -308,7 +308,12 @@ async function showAllTrackedUsers(chatId) {
 
     try {
         let message = `📊 Barcha Foydalanuvchilar - Jami: ${allUsers.length}\n\n`;
-    
+        
+ 
+        const messages = splitMessage(message);
+        for (const msg of messages) {
+            await bot.sendMessage(chatId, msg, adminKeyboard);
+        }
     } catch (error) {
         console.error("Error showing all users:", error);
         await bot.sendMessage(chatId, "❌ Foydalanuvchilarni ko'rsatishda xatolik: " + error.message, adminKeyboard);
@@ -344,19 +349,7 @@ async function showPendingRequests(chatId) {
         
         let message = `📋 Kutayotgan Kanal So'rovlari - Jami: ${allUsers.length}\n\n`;
         
-        allUsers.forEach((user, index) => {
-            const username = user.username ? `@${user.username}` : 'Username yo\'q';
-            const fullName = `${user.first_name}${user.last_name ? ' ' + user.last_name : ''}`;
-            
-            message += `${index + 1}. ${fullName}\n`;
-            message += `   👤 Username: ${username}\n`;
-            message += `   🆔 User ID: ${user.id}\n`;
-            message += `   💬 Kanal ID: ${user.chatId}\n`;
-            message += `   ✅ Tasdiqlash: /approve_${user.id}\n\n`;
-        });
-
-        console.log('Generated message:', message);
-        
+  
         const messages = splitMessage(message);
         for (const msg of messages) {
             await bot.sendMessage(chatId, msg, adminKeyboard);
@@ -379,18 +372,7 @@ async function showApprovedUsers(chatId) {
     try {
         let message = `👥 Tasdiqlangan Foydalanuvchilar - Jami: ${approvedUsers.size}\n\n`;
         let count = 1;
-        
-        for (const [userId, userData] of approvedUsers.entries()) {
-            const username = userData.username ? `@${userData.username}` : 'Username yo\'q';
-            const fullName = `${userData.first_name}${userData.last_name ? ' ' + userData.last_name : ''}`;
-            
-            message += `${count}. ${fullName}\n`;
-            message += `   👤 Username: ${username}\n`;
-            message += `   🆔 User ID: ${userId}\n`;
-            message += `   ✅ Tasdiqlangan: ${new Date(userData.approvedAt).toLocaleString()}\n`;
-            message += `   📨 Xabar yuborish: /broadcast_${userId}\n\n`;
-            count++;
-        }
+      
 
         const messages = splitMessage(message);
         for (const msg of messages) {
