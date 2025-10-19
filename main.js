@@ -1,5 +1,27 @@
 const TelegramBot = require("node-telegram-bot-api");
+const express = require('express');
 
+// Create a simple HTTP server to satisfy port binding requirement
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+  res.send('🤖 Telegram Bot is running...');
+});
+
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    message: 'Bot is healthy',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`🔄 HTTP server running on port ${PORT}`);
+});
+
+// Your existing bot code continues here...
 const token = "8318189443:AAHdp7AcIxwgIbYR0HOueTZ3lzUBX4slW8Q";
 const bot = new TelegramBot(token, { polling: true });
 
@@ -557,7 +579,7 @@ async function startBroadcastMode(chatId, adminId) {
         `📢 *Xabar Tarqatish Rejimi*\n\n` +
         `Iltimos, barcha ${approvedUsers.size} tasdiqlangan foydalanuvchilarga yubormoqchi bo'lgan xabaringizni kiriting.\n\n` +
         `*Xabaringizni hozir yuboring...*\n\n` +
-       
+        `Bekor qilish uchun /cancel yuboring`,
         { 
             parse_mode: "Markdown",
             reply_markup: {
