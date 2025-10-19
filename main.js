@@ -1,5 +1,6 @@
 const TelegramBot = require("node-telegram-bot-api");
 const express = require('express');
+const axios = require('axios');
 
 // Create a simple HTTP server to satisfy port binding requirement
 const app = express();
@@ -13,13 +14,36 @@ app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'OK', 
     message: 'Bot is healthy',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: process.memoryUsage()
   });
 });
 
 app.listen(PORT, () => {
   console.log(`🔄 HTTP server running on port ${PORT}`);
 });
+
+// Self-pinging to keep the bot awake
+const PING_INTERVAL = 10 * 60 * 1000; // 10 minutes
+const APP_URL = process.env.APP_URL || 'https://botrequest.onrender.com';
+
+async function pingSelf() {
+  try {
+    const response = await axios.get(`${APP_URL}/health`);
+    console.log(`✅ Self-ping successful: ${response.status} - ${new Date().toLocaleTimeString()}`);
+  } catch (error) {
+    console.error(`❌ Self-ping failed: ${error.message}`);
+  }
+}
+
+// Start periodic pinging
+setInterval(pingSelf, PING_INTERVAL);
+
+// Initial ping
+setTimeout(pingSelf, 5000);
+
+console.log(`🔄 Self-pinging enabled. Pinging ${APP_URL} every 10 minutes`);
 
 // Your existing bot code continues here...
 const token = "8318189443:AAHdp7AcIxwgIbYR0HOueTZ3lzUBX4slW8Q";
@@ -737,3 +761,4 @@ bot.on("error", (error) => {
 });
 
 console.log("🤖 Bot foydalanuvchilarni kuzatish va faol foydalanuvchilar funksiyasi bilan ishga tushdi...");
+console.log("🔄 Bot will stay awake with automatic self-pinging every 10 minutes");
