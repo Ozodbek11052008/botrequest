@@ -783,12 +783,7 @@ async function showApprovedUsers(chatId) {
             const username = userData.username ? `@${userData.username}` : 'Username yo\'q';
             const fullName = `${userData.first_name}${userData.last_name ? ' ' + userData.last_name : ''}`;
             
-            message += `${count}. ${fullName}\n`;
-            message += `   👤 Username: ${username}\n`;
-            message += `   🆔 User ID: ${userId}\n`;
-            message += `   ✅ Tasdiqlangan: ${new Date(userData.approvedAt).toLocaleString()}\n`;
-            if (userData.channelId) {
-                message += `   📺 Kanal: ${userData.channelId}\n`;
+            message += `${coun`   📺 Kanal: ${userData.channelId}\n`;
             }
             message += `\n`;
             count++;
@@ -835,7 +830,7 @@ function notifyAdminsAboutNewRequest(user, chat) {
 
     ADMINS.forEach(adminId => {
         bot.sendMessage(adminId, message, { parse_mode: "Markdown", ...mainAdminKeyboard })
-            .catch(err => console.error("Error notifying admin:", err));
+            .catch(err => console.error("Error notifying admin:", err))
     });
 }
 
